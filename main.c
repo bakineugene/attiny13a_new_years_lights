@@ -21,26 +21,13 @@
 #define WDT_PREPARE_CHANGE() WDTCR = (1 << WDCE)
 #define WDT_ENABLE_INTERRUPT_250() WDTCR = (1 << WDTIE) | (1 << WDP2)
 
-volatile uint8_t mode = 1;
-
-ISR(PCINT0_vect) {
-    PCINT0_DISABLE();
-
-    if (++mode > 9) mode = 1;
-
-    cli();
-    WDT_PREPARE_CHANGE();
-    WDT_ENABLE_INTERRUPT_250();
-    sei();
-}
-
-ISR(WDT_vect) {
-    WDT_DISABLE();
-    PCINT0_CLEANUP();
-    PCINT0_ENABLE();
-}
+#define CH_0 0xFF
+#define CH_R 0
+#define CH_G 1
+#define CH_B 2
 
 #define WAVE_LEN 24
+#define MODE_COUNT 9
 
 const uint8_t wave_hard[WAVE_LEN] PROGMEM = {
     0,  5, 15, 30, 60, 100, 150, 200,
@@ -54,6 +41,46 @@ const uint8_t wave_soft[WAVE_LEN] PROGMEM = {
    30, 15,  8,  3,  1,  0,  0,  0
 };
 
+static inline void pgm_read_block(const void *s, void *dest, uint8_t len) {
+    uint8_t *dp = (uint8_t *)dest;
+    for (uint8_t i=0; i<len; i++) {
+        dp[i] = pgm_read_byte(i + (const uint8_t *)s);
+    }
+}
+
+typedef struct Mode {
+    uint8_t soft;
+    uint8_t hard;
+} Mode;
+
+const Mode modes[MODE_COUNT] PROGMEM = {
+    { CH_G, CH_0 },
+    { CH_R, CH_0 },
+    { CH_B, CH_0 },
+    { CH_G, CH_R },
+    { CH_R, CH_B },
+    { CH_B, CH_R },
+    { CH_G, CH_B },
+    { CH_R, CH_G },
+    { CH_B, CH_G }
+};
+
+volatile uint8_t mode_num = 0;
+
+ISR(PCINT0_vect) {
+    PCINT0_DISABLE();
+
+    if (++mode_num >= MODE_COUNT) mode_num = 0;
+
+    WDT_PREPARE_CHANGE();
+    WDT_ENABLE_INTERRUPT_250();
+}
+
+ISR(WDT_vect) {
+    WDT_DISABLE();
+    PCINT0_CLEANUP();
+    PCINT0_ENABLE();
+}
 
 int main(void) {
     WDT_DISABLE();
@@ -70,44 +97,17 @@ int main(void) {
 
     uint8_t step = 0;
     while (1) {
+        Mode mode;
+        pgm_read_block(&modes[mode_num], (void*)&mode, sizeof(Mode));
+
         for (int l = 0; l < 100; ++l) {
             int idx = (l + step) % WAVE_LEN;
-            uint8_t green = 0;
-            uint8_t red = 0;
-            uint8_t blue = 0;
 
-            switch (mode) {
-                case 1:
-                case 4:
-                case 7:
-                    green = pgm_read_byte(&wave_soft[idx]);
-                    break;
-                case 2:
-                case 5:
-                case 8:
-                    red = pgm_read_byte(&wave_soft[idx]);
-                    break;
-                case 3:
-                case 6:
-                case 9:
-                    blue = pgm_read_byte(&wave_soft[idx]);
-                    break;
-            }
-            switch (mode) {
-                case 4:
-                case 6:
-                    red = pgm_read_byte(&wave_hard[idx]);
-                    break;
-                case 7:
-                case 5:
-                    blue = pgm_read_byte(&wave_hard[idx]);
-                    break;
-                case 8:
-                case 9:
-                    green = pgm_read_byte(&wave_hard[idx]);
-                    break;
-            }
-            led.sendRGB(red, green, blue);
+            uint8_t color[3] = {0, 0, 0};
+            if (mode.soft != CH_0) color[mode.soft] = pgm_read_byte(&wave_soft[idx]);
+            if (mode.hard != CH_0) color[mode.hard] = pgm_read_byte(&wave_hard[idx]);
+
+            led.sendRGB(color[CH_R], color[CH_G], color[CH_B]);
         }
         if (step >= WAVE_LEN - 1) step = 0;
         else ++step;
