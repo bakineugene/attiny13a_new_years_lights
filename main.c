@@ -1,4 +1,5 @@
 #include <avr/io.h>
+#include <avr/pgmspace.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
 
@@ -6,43 +7,78 @@
 
 #include "tinyLED.h"
 
-int main(int argc, char** argv) {
+#define PCINT0_CLEANUP() GIFR |= (1 << PCIF)
+#define PCINT0_ENABLE() GIMSK |= (1 << PCIE)
+#define PCINT0_DISABLE() GIMSK &= ~(1 << PCIE)
+#define PCINT0_ENABLE_PIN(pin) PCMSK |= (1 << pin)
+
+#define PORTB_SET_OUTPUT(pin) DDRB |= (1 << pin)
+#define PORTB_SET_INPUT(pin) DDRB &= ~(1 << pin)
+#define PORTB_TOGGLE(pin) PORTB ^= (1 << pin)
+#define PORTB_SET_HIGH(pin) PORTB |= (1 << pin)
+
+#define WDT_DISABLE() WDTCR = 0x0
+#define WDT_PREPARE_CHANGE() WDTCR = (1 << WDCE)
+#define WDT_ENABLE_INTERRUPT_250() WDTCR = (1 << WDTIE) | (1 << WDP2)
+
+ISR(PCINT0_vect) {
+    PCINT0_DISABLE();
+
+    // CHANGE SMTH
+
+    cli();
+    WDT_PREPARE_CHANGE();
+    WDT_ENABLE_INTERRUPT_250();
+    sei();
+}
+
+ISR(WDT_vect) {
+    WDT_DISABLE();
+    PCINT0_CLEANUP();
+    PCINT0_ENABLE();
+}
+
+#define WAVE_LEN 24
+
+const uint8_t wave_r[WAVE_LEN] PROGMEM = {
+    0,  5, 15, 30, 60, 100, 150, 200,
+  240,255,255,240,220,200,170,140,
+  110, 80, 55, 35, 20, 10,  5,  0
+};
+
+const uint8_t wave_g[WAVE_LEN] PROGMEM = {
+    0,  0,  2,  5, 10,  20,  40,  80,
+  120,160,180,160,140,110, 80,  50,
+   30, 15,  8,  3,  1,  0,  0,  0
+};
+
+
+int main(void) {
+    WDT_DISABLE();
+    PCINT0_ENABLE();
+    PCINT0_ENABLE_PIN(PCINT4);
 
     tinyLED<3> led;
+    led.setBrightness(200);
 
-    led.setBrightness(150);
+    PORTB_SET_INPUT(PB4);
+    PORTB_SET_HIGH(PB4);
 
-    DDRB |= (1 << 5);
+    sei();
 
-    int step = 1;
-    uint8_t color_r = 0;
-    uint8_t color_g = 240;
-    uint8_t color_b = 0;
-    int delay = 24;
+    uint8_t step = 0;
     while (1) {
-        for (int l = 0; l < 100; ++l)  {
-            if (step == 0) {
-                if (color_r < 2) step = 1;
-                color_g += 10;
-                color_r -= 10;
-            }
-            if (step == 1) {
-                if (color_g < 2) step = 2;
-                color_b += 10;
-                color_g -= 10;
-            }
-            if (step == 2) {
-                if (color_b < 2) step = 0;
-                color_r += 10;
-                color_b -= 10;
-            }
-            led.sendRGB(color_r, color_g, color_b);
-
+        for (int l = 0; l < 100; ++l) {
+            int idx = (l + step) % WAVE_LEN;
+            led.sendRGB(
+                pgm_read_byte(&wave_g[idx]),
+                pgm_read_byte(&wave_r[idx]),
+                0
+            );
         }
-        PORTB &= ~(1 << 5);
-        for (int i = delay; i > 0; i -= 10) _delay_ms(1000);
-        PORTB |=  (1 << 5);
-        for (int i = delay; i > 0; i -= 10) _delay_ms(1000);
+        if (step >= WAVE_LEN - 1) step = 0;
+        else ++step;
+        _delay_ms(100);
     }
-
 }
+
