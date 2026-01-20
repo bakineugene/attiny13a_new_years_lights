@@ -107,8 +107,8 @@ ISR(PCINT0_vect) {
         if (button_tick_counter > LONG_PRESS) {
             uint8_t previous_cell_idx = cell_idx;
             if (++cell_idx >= EE_SIZE) cell_idx = 0;
-            eeprom_update_byte(&ee_values[cell_idx], mode_num);
             eeprom_update_byte(&ee_values[previous_cell_idx], UNDEFINED);
+            eeprom_update_byte(&ee_values[cell_idx], mode_num);
             remembered_mode = MODE_COUNT;
         } else if (button_tick_counter > SINGLE_PRESS) {
             if (++mode_num >= MODE_COUNT) mode_num = 0;
@@ -156,9 +156,7 @@ int main(void) {
     while (1) {
         Mode mode;
         uint8_t current_mode = mode_num;
-        if (remembered_mode > 0) {
-            current_mode = remembered_mode--;
-        }
+        if (remembered_mode > 0) current_mode = --remembered_mode;
         pgm_read_block(&modes[current_mode], (void*)&mode, sizeof(Mode));
 
         for (int l = 0; l < 100; ++l) {
