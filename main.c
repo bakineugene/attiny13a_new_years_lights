@@ -1,6 +1,7 @@
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <avr/interrupt.h>
+#include <avr/eeprom.h>
 #include <util/delay.h>
 
 #define byte uint8_t
@@ -17,8 +18,14 @@
 #define PORTB_TOGGLE(pin) PORTB ^= (1 << pin)
 #define PORTB_SET_HIGH(pin) PORTB |= (1 << pin)
 
+#define PINB_GET(pin) PINB & (1 << pin)
+
 #define WDT_DISABLE() WDTCR = 0x0
 #define WDT_PREPARE_CHANGE() WDTCR = (1 << WDCE)
+#define WDT_ENABLE_INTERRUPT_16() WDTCR =  (1 << WDTIE)
+#define WDT_ENABLE_INTERRUPT_32() WDTCR =  (1 << WDTIE) | (1 << WDP0)
+#define WDT_ENABLE_INTERRUPT_64() WDTCR =  (1 << WDTIE) | (1 << WDP1)
+#define WDT_ENABLE_INTERRUPT_125() WDTCR = (1 << WDTIE) | (1 << WDP0) | (1 << WDP1)
 #define WDT_ENABLE_INTERRUPT_250() WDTCR = (1 << WDTIE) | (1 << WDP2)
 
 #define CH_0 0xFF
@@ -28,6 +35,9 @@
 
 #define WAVE_LEN 24
 #define MODE_COUNT 9
+
+uint8_t EEMEM ee_flags[32];
+uint8_t EEMEM ee_values[32];
 
 const uint8_t wave_hard[WAVE_LEN] PROGMEM = {
     0,  5, 15, 30, 60, 100, 150, 200,
@@ -66,39 +76,68 @@ const Mode modes[MODE_COUNT] PROGMEM = {
 };
 
 volatile uint8_t mode_num = 0;
+volatile uint8_t remembered_mode = 0;
+volatile uint8_t button_tick_counter = 0;
 
 ISR(PCINT0_vect) {
-    PCINT0_DISABLE();
-
-    if (++mode_num >= MODE_COUNT) mode_num = 0;
-
-    WDT_PREPARE_CHANGE();
-    WDT_ENABLE_INTERRUPT_250();
+    if (PINB_GET(PB4)) {
+        if (button_tick_counter > 50) {
+            /*
+             * > 800ms
+             * LONGPRESS
+             */
+            eeprom_update_byte(&ee_values[0], mode_num);
+            remembered_mode = 3;
+        } else if (button_tick_counter <= 3) {
+            /*
+             * < 50 ms
+             * NOPRESS
+             */
+        } else {
+            /*
+             * SINGLEPRESS
+             */
+            ++mode_num;
+            if (mode_num >= MODE_COUNT) mode_num = 0;
+        }
+    }
+    /*
+     * button is pressed or runpressed - reset counter
+     */
+    button_tick_counter = 0;
 }
 
 ISR(WDT_vect) {
-    WDT_DISABLE();
-    PCINT0_CLEANUP();
-    PCINT0_ENABLE();
+    ++button_tick_counter;
 }
 
 int main(void) {
-    WDT_DISABLE();
-    PCINT0_ENABLE();
-    PCINT0_ENABLE_PIN(PCINT4);
-
-    tinyLED<3> led;
-    led.setBrightness(200);
+    _delay_ms(100);
 
     PORTB_SET_INPUT(PB4);
     PORTB_SET_HIGH(PB4);
 
+    mode_num = eeprom_read_byte(&ee_values[0]);
+    if (mode_num >= MODE_COUNT) mode_num = 0;
+    button_tick_counter = 0;
+
+    tinyLED<3> led;
+    led.setBrightness(200);
+
+    WDT_PREPARE_CHANGE();
+    WDT_ENABLE_INTERRUPT_16();
+    PCINT0_ENABLE();
+    PCINT0_ENABLE_PIN(PCINT4);
     sei();
 
     uint8_t step = 0;
     while (1) {
         Mode mode;
-        pgm_read_block(&modes[mode_num], (void*)&mode, sizeof(Mode));
+        uint8_t current_mode = mode_num;
+        if (remembered_mode > 0) {
+            current_mode = remembered_mode--;
+        }
+        pgm_read_block(&modes[current_mode], (void*)&mode, sizeof(Mode));
 
         for (int l = 0; l < 100; ++l) {
             int idx = (l + step) % WAVE_LEN;

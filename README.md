@@ -1,10 +1,10 @@
 # Description
 
-This repository contains driver for WS2812 LEDs, running on ATtiny13A (8 MHz internal RC).  
+This repository contains driver for WS2812 LEDs, running on ATtiny13A (9.6 MHz internal RC).
 
 # Pinout
 
-PB3 - data input pin for ws2812  
+PB3 - data input pin for ws2812
 PB4 - used to switch modes. Debounce is implemented using the watchdog timer.
 
 # Modes
