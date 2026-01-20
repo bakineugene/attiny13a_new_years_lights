@@ -76,33 +76,35 @@ const Mode modes[MODE_COUNT] PROGMEM = {
 };
 
 volatile uint8_t mode_num = 0;
+volatile uint8_t cell_idx = 0;
 volatile uint8_t remembered_mode = 0;
 volatile uint8_t button_tick_counter = 0;
 
+/*
+ * > 800ms
+ */
+#define LONG_PRESS 50
+
+/*
+ * > 50ms
+ */
+#define SINGLE_PRESS 3
+
 ISR(PCINT0_vect) {
     if (PINB_GET(PB4)) {
-        if (button_tick_counter > 50) {
-            /*
-             * > 800ms
-             * LONGPRESS
-             */
-            eeprom_update_byte(&ee_values[0], mode_num);
-            remembered_mode = 3;
-        } else if (button_tick_counter <= 3) {
-            /*
-             * < 50 ms
-             * NOPRESS
-             */
-        } else {
-            /*
-             * SINGLEPRESS
-             */
-            ++mode_num;
-            if (mode_num >= MODE_COUNT) mode_num = 0;
+        if (button_tick_counter > LONG_PRESS) {
+            uint8_t flag = eeprom_read_byte(&ee_flags[cell_idx]);
+            if (++cell_idx >= 32) cell_idx = 0;
+            if (++flag == 0) flag = 1;
+            eeprom_update_byte(&ee_flags[cell_idx], flag);
+            eeprom_update_byte(&ee_values[cell_idx], mode_num);
+            remembered_mode = MODE_COUNT;
+        } else if (button_tick_counter > SINGLE_PRESS) {
+            if (++mode_num >= MODE_COUNT) mode_num = 0;
         }
     }
     /*
-     * button is pressed or runpressed - reset counter
+     * button is pressed or unpressed - reset counter
      */
     button_tick_counter = 0;
 }
@@ -117,7 +119,19 @@ int main(void) {
     PORTB_SET_INPUT(PB4);
     PORTB_SET_HIGH(PB4);
 
-    mode_num = eeprom_read_byte(&ee_values[0]);
+    {
+        uint8_t max_flag = 0;
+        cell_idx = 0;
+        for (int i = 0; i < 32; ++i) {
+            uint8_t flag = eeprom_read_byte(&ee_flags[i]);
+            if (flag > max_flag && flag < 0xFF) {
+                max_flag = flag;
+                cell_idx = i;
+            }
+        }
+        mode_num = eeprom_read_byte(&ee_values[cell_idx]);
+    }
+
     if (mode_num >= MODE_COUNT) mode_num = 0;
     button_tick_counter = 0;
 

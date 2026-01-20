@@ -13,5 +13,9 @@ attiny-set-fuses:
 attiny-reset-eep:
 	avrdude -c usbasp -p t13 -U eeprom:w:"./build/main.eep":i
 
+attiny-dump-eep:
+	mkdir -p debug
+	avrdude -c usbasp -p t13 -U eeprom:r:"./debug/dump.eep":i
+
 clean:
 	rm -rf build
